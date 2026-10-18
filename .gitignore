@@ -1,1 +1,11 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+.env
+*.log
 .idea/
+.vscode/
+
+# Згенеровані 3D-моделі авто
+apps/api/storage/
