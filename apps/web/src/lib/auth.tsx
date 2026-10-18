@@ -6,6 +6,9 @@ import { api, ApiError, tokenStorage } from './api';
 interface AuthContextValue {
   user: UserDto | null;
   isLoading: boolean;
+  /** Сервер так і не відповів після всіх повторів (не 401). */
+  isServerDown: boolean;
+  retry: () => void;
   signIn: (auth: AuthResponse) => void;
   signOut: () => void;
 }
@@ -25,6 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retryDelay: 1500,
   });
   const unauthorized = isUnauthorized(meQuery.error);
+  const serverDown = hasToken && meQuery.isError && !unauthorized && !meQuery.isFetching;
+  const { refetch } = meQuery;
 
   useEffect(() => {
     if (unauthorized) tokenStorage.clear();
@@ -48,11 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user: hasToken && !unauthorized ? (meQuery.data ?? null) : null,
-      isLoading: hasToken && !unauthorized && !meQuery.data,
+      isLoading: hasToken && !unauthorized && !serverDown && !meQuery.data,
+      isServerDown: serverDown,
+      retry: () => void refetch(),
       signIn,
       signOut,
     }),
-    [hasToken, meQuery.data, unauthorized, signIn, signOut],
+    [hasToken, meQuery.data, unauthorized, serverDown, refetch, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

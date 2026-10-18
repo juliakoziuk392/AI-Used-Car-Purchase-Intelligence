@@ -1,6 +1,7 @@
 import { CAR_ZONE_LABELS, type CarZone, type ReportFinding } from '@carintel/shared';
 import { lazy, Suspense, useRef, type ReactNode } from 'react';
 import { SEVERITY_COLOR, worstSeverity } from '../car/zones';
+import { ErrorBoundary } from '../ErrorBoundary';
 import type { SceneCommands } from './CarScene';
 import { DEFAULT_PAINT } from './paint';
 
@@ -38,16 +39,19 @@ export function Showroom({
       <div className="showroom-ray left-[46%]" style={{ animationDelay: '-2.5s', width: '10%' }} />
       <div className="showroom-ray left-[70%]" style={{ animationDelay: '-5s' }} />
 
-      <Suspense fallback={<SceneLoader />}>
-        <CarScene
-          paint={paint}
-          findings={findings}
-          selectedZone={selectedZone}
-          onSelectZone={onSelectZone}
-          scanning={scanning}
-          commands={commands}
-        />
-      </Suspense>
+      {/* Без WebGL (вимкнене апаратне прискорення, збій драйвера) сцена падає — решта сторінки має жити. */}
+      <ErrorBoundary fallback={() => <SceneUnavailable />}>
+        <Suspense fallback={<SceneLoader />}>
+          <CarScene
+            paint={paint}
+            findings={findings}
+            selectedZone={selectedZone}
+            onSelectZone={onSelectZone}
+            scanning={scanning}
+            commands={commands}
+          />
+        </Suspense>
+      </ErrorBoundary>
 
       <header className="pointer-events-none absolute inset-x-0 top-8 z-10 px-6 text-center">
         <p className="eyebrow">{eyebrow}</p>
@@ -130,6 +134,17 @@ function SceneLoader() {
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
       <span className="h-10 w-10 animate-spin rounded-full border-[3px] border-white/15 border-t-ice" />
       <span className="text-shimmer text-sm font-medium">Готуємо шоурум…</span>
+    </div>
+  );
+}
+
+function SceneUnavailable() {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+      <span className="text-sm font-medium text-ice/80">3D-перегляд недоступний у цьому браузері</span>
+      <span className="max-w-sm text-xs text-mist">
+        Увімкни апаратне прискорення в налаштуваннях браузера й перезавантаж сторінку. Звіт нижче працює й без 3D.
+      </span>
     </div>
   );
 }
