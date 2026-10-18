@@ -68,7 +68,8 @@ export interface ListingDto {
   id: string;
   url: string;
   source: ListingSource;
-  price: number;
+  /** Ціна з оголошення в USD; null — якщо на сторінці її не знайшли. */
+  price: number | null;
   mileage: number | null;
   vehicle: VehicleDto | null;
   rawData: Partial<ParsedListing>;

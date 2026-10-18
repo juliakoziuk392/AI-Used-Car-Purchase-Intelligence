@@ -6,9 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Field } from './Field';
 
-const toNumber = (value: string) => (value.trim() === '' ? undefined : Number(value.replace(/\s/g, '')));
-
-/** Лише посилання й ціна: оголошення створюється й одразу йде на AI-аналіз. */
+/** Лише посилання: ціну й решту AI бере з оголошення, а оголошення одразу йде на аналіз. */
 export function ListingForm() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -37,14 +35,6 @@ export function ListingForm() {
         className="flex-1"
         error={errors.url?.message}
         {...form.register('url')}
-      />
-      <Field
-        label="Ціна, $"
-        placeholder="53 000"
-        inputMode="numeric"
-        className="md:w-40"
-        error={errors.price?.message}
-        {...form.register('price', { setValueAs: toNumber })}
       />
       <button type="submit" disabled={mutation.isPending} className="btn btn-primary md:mt-[1.6rem] md:py-[0.7rem]">
         {mutation.isPending ? 'Читаємо оголошення…' : 'Перевірити авто'}

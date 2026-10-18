@@ -1,6 +1,7 @@
 import type { ListingDto } from '@carintel/shared';
 
-export const formatUsd = (value: number) => `$${value.toLocaleString('uk-UA')}`;
+export const formatUsd = (value: number | null) =>
+  value === null ? 'Ціна не вказана' : `$${value.toLocaleString('uk-UA')}`;
 export const formatKm = (value: number) => `${value.toLocaleString('uk-UA')} км`;
 
 export function vehicleTitle(listing: ListingDto) {

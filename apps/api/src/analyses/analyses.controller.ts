@@ -44,6 +44,12 @@ export class AnalysesController {
     });
   }
 
+  /** Згенерувати 3D-модель ще раз. Відповідає, коли модель готова (зазвичай 1–3 хв). */
+  @Post('analyses/:id/model3d')
+  regenerateModel(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.analyses.regenerateModel(user.sub, id);
+  }
+
   /** SSE: стан аналізу в реальному часі. Стрім закривається, коли аналіз done/failed. */
   @Sse('analyses/:id/events')
   async events(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {

@@ -1,8 +1,4 @@
-import {
-  detectListingSource,
-  type CreateListingInput,
-  type UpdateListingInput,
-} from '@carintel/shared';
+import { detectListingSource, type CreateListingInput } from '@carintel/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type { Transaction } from 'sequelize';
@@ -45,7 +41,7 @@ export class ListingsService {
     return listing;
   }
 
-  /** Користувач дає лише посилання й ціну — марку, модель, рік, пробіг і фото беремо зі сторінки. */
+  /** Користувач дає лише посилання — ціну, марку, модель, рік, пробіг і фото беремо зі сторінки. */
   async create(userId: string, input: CreateListingInput) {
     // Якщо сторінку не вдалося прочитати, оголошення все одно створюємо — AI спробує ще раз під час аналізу.
     const parsed = await parseListingPage(input.url).catch(() => EMPTY_PARSED_LISTING);
@@ -53,7 +49,7 @@ export class ListingsService {
       userId,
       url: input.url,
       source: detectListingSource(input.url),
-      price: input.price,
+      price: parsed.priceUsd,
       mileage: parsed.mileageKm,
       rawData: parsed,
     });
@@ -87,12 +83,6 @@ export class ListingsService {
       ? (await this.vehicles.findOrCreate({ where: { vin: fields.vin }, defaults: { ...fields } }))[0]
       : await this.vehicles.create({ ...fields });
     await listing.update({ vehicleId: vehicle.id });
-  }
-
-  async update(userId: string, id: string, input: UpdateListingInput) {
-    const listing = await this.findOne(userId, id);
-    await listing.update(input);
-    return listing;
   }
 
   async remove(userId: string, id: string) {

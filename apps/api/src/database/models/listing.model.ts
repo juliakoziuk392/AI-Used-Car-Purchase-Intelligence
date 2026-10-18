@@ -38,8 +38,9 @@ export class Listing extends Model {
   @Column({ type: DataType.ENUM(...LISTING_SOURCES), allowNull: false })
   declare source: ListingSource;
 
-  @Column({ type: DataType.INTEGER, allowNull: false })
-  declare price: number;
+  /** Ціна з оголошення в USD; null — якщо на сторінці її не знайшли. */
+  @Column(DataType.INTEGER)
+  declare price: number | null;
 
   @Column(DataType.INTEGER)
   declare mileage: number | null;

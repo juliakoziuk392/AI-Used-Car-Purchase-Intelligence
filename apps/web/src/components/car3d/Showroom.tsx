@@ -12,6 +12,12 @@ interface ShowroomProps {
   eyebrow: string;
   title: string;
   subtitle?: ReactNode;
+  /** 3D-модель саме цього авто, згенерована з фото оголошення. */
+  modelUrl?: string;
+  /** Фото авто з оголошення — показуємо, поки 3D немає, замість чужої стандартної моделі. */
+  photo?: string;
+  /** Повідомлення під авто (напр. чому 3D не згенерувалось і кнопка «ще раз»). */
+  notice?: ReactNode;
   paint?: string;
   findings?: ReportFinding[];
   selectedZone?: CarZone | null;
@@ -24,6 +30,9 @@ export function Showroom({
   eyebrow,
   title,
   subtitle,
+  modelUrl,
+  photo,
+  notice,
   paint = DEFAULT_PAINT,
   findings = [],
   selectedZone = null,
@@ -32,6 +41,7 @@ export function Showroom({
 }: ShowroomProps) {
   const commands = useRef<SceneCommands | null>(null);
   const zones = groupByZone(findings);
+  const showPhoto = !modelUrl && Boolean(photo);
 
   return (
     <section className="showroom relative h-[78vh] min-h-[560px] overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.8)]">
@@ -39,19 +49,25 @@ export function Showroom({
       <div className="showroom-ray left-[46%]" style={{ animationDelay: '-2.5s', width: '10%' }} />
       <div className="showroom-ray left-[70%]" style={{ animationDelay: '-5s' }} />
 
-      {/* Без WebGL (вимкнене апаратне прискорення, збій драйвера) сцена падає — решта сторінки має жити. */}
-      <ErrorBoundary fallback={() => <SceneUnavailable />}>
-        <Suspense fallback={<SceneLoader />}>
-          <CarScene
-            paint={paint}
-            findings={findings}
-            selectedZone={selectedZone}
-            onSelectZone={onSelectZone}
-            scanning={scanning}
-            commands={commands}
-          />
-        </Suspense>
-      </ErrorBoundary>
+      {showPhoto ? (
+        <PhotoStage photo={photo!} scanning={scanning} />
+      ) : (
+        // Без WebGL (вимкнене апаратне прискорення, збій драйвера) сцена падає — решта сторінки має жити.
+        // key: нова модель (перегенерація) — нова сцена з заїздом авто.
+        <ErrorBoundary key={modelUrl} fallback={() => <SceneUnavailable />}>
+          <Suspense fallback={<SceneLoader />}>
+            <CarScene
+              modelUrl={modelUrl}
+              paint={paint}
+              findings={findings}
+              selectedZone={selectedZone}
+              onSelectZone={onSelectZone}
+              scanning={scanning}
+              commands={commands}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       <header className="pointer-events-none absolute inset-x-0 top-8 z-10 px-6 text-center">
         <p className="eyebrow">{eyebrow}</p>
@@ -88,28 +104,41 @@ export function Showroom({
         </nav>
       )}
 
-      <div className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
-        <RoundButton label="Наблизити" onClick={() => commands.current?.zoom(1.2)}>+</RoundButton>
-        <RoundButton label="Віддалити" onClick={() => commands.current?.zoom(-1.2)}>−</RoundButton>
-        <RoundButton
-          label="Початковий вигляд"
-          onClick={() => {
-            onSelectZone(null);
-            commands.current?.reset();
-          }}
-        >
-          ⟲
-        </RoundButton>
-      </div>
+      {!showPhoto && (
+        <>
+          <div className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
+            <RoundButton label="Наблизити" onClick={() => commands.current?.zoom(1.2)}>+</RoundButton>
+            <RoundButton label="Віддалити" onClick={() => commands.current?.zoom(-1.2)}>−</RoundButton>
+            <RoundButton
+              label="Початковий вигляд"
+              onClick={() => {
+                onSelectZone(null);
+                commands.current?.reset();
+              }}
+            >
+              ⟲
+            </RoundButton>
+          </div>
 
-      <div className="absolute inset-x-0 bottom-[7%] z-10 flex items-center justify-center gap-4">
-        <RoundButton label="Повернути вліво" onClick={() => commands.current?.rotateBy(-45)}>‹</RoundButton>
-        <span className="select-none text-sm font-semibold tracking-[0.2em] text-ice/80">360°</span>
-        <RoundButton label="Повернути вправо" onClick={() => commands.current?.rotateBy(45)}>›</RoundButton>
-      </div>
+          <div className="absolute inset-x-0 bottom-[7%] z-10 flex items-center justify-center gap-4">
+            <RoundButton label="Повернути вліво" onClick={() => commands.current?.rotateBy(-45)}>‹</RoundButton>
+            <span className="select-none text-sm font-semibold tracking-[0.2em] text-ice/80">360°</span>
+            <RoundButton label="Повернути вправо" onClick={() => commands.current?.rotateBy(45)}>›</RoundButton>
+          </div>
+        </>
+      )}
+
+      {notice && (
+        // Над картками звіту, які наїжджають на низ шоуруму.
+        <div className="absolute inset-x-0 bottom-36 z-10 flex justify-center px-6">{notice}</div>
+      )}
 
       <p className="pointer-events-none absolute bottom-3 right-5 z-10 text-[10px] text-ice/35">
-        Перетягни, щоб покрутити · 3D: «Car Concept» © Khronos Group, CC BY 4.0
+        {modelUrl
+          ? 'Перетягни, щоб покрутити · 3D згенеровано з фото оголошення (TRELLIS)'
+          : showPhoto
+            ? 'Фото з оголошення'
+            : 'Перетягни, щоб покрутити · 3D: «Car Concept» © Khronos Group, CC BY 4.0'}
       </p>
     </section>
   );
@@ -126,6 +155,22 @@ function RoundButton({ label, onClick, children }: { label: string; onClick: () 
     >
       {children}
     </button>
+  );
+}
+
+/** Реальне фото авто на «сцені» — поки 3D саме цього авто немає. */
+function PhotoStage({ photo, scanning }: { photo: string; scanning: boolean }) {
+  return (
+    <div className="absolute inset-x-0 bottom-56 top-[24%] flex items-center justify-center px-6 md:px-[22%]">
+      <div className="car-drive-in relative h-full overflow-hidden rounded-2xl shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)]">
+        <img src={photo} alt="Авто з оголошення" className="block h-full w-auto max-w-full object-contain" />
+        {scanning && (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+            <div className="scan-beam h-full w-1/5 bg-gradient-to-r from-transparent via-sky-200/40 to-transparent mix-blend-screen" />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

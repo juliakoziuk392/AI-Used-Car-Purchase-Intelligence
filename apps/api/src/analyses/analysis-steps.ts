@@ -62,6 +62,8 @@ export class AnalysisPipeline {
     await listing.update({
       rawData: context.parsed,
       mileage: listing.mileage ?? context.parsed.mileageKm,
+      // Продавець міг змінити ціну — аналізуємо актуальну.
+      price: context.parsed.priceUsd ?? listing.price,
     });
   }
 
@@ -89,6 +91,10 @@ export class AnalysisPipeline {
     await this.listings.applyVehicle(listing, { ...report.vehicle, vin: parsed?.vin });
     if (listing.mileage === null && report.vehicle.mileageKm !== null) {
       await listing.update({ mileage: report.vehicle.mileageKm });
+    }
+    // Парсер не знайшов ціну в $ (напр. вказана в грн) — беремо ту, що AI прочитав в оголошенні.
+    if (listing.price === null && report.price.listedPriceUsd !== null) {
+      await listing.update({ price: report.price.listedPriceUsd });
     }
 
     await this.riskFlags.destroy({ where: { analysisId: analysis.id } });

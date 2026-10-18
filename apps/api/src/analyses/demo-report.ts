@@ -6,7 +6,7 @@ import type { Listing } from '../database/models';
  * Знахідки — загальні пункти огляду для будь-якого вживаного авто, а не висновки про це оголошення.
  */
 export function buildDemoReport(listing: Listing, parsed: ParsedListing): AnalysisReport {
-  const price = listing.price;
+  const price = parsed.priceUsd ?? listing.price ?? 0;
   const mileage = parsed.mileageKm ?? listing.mileage ?? 0;
   const year = listing.vehicle?.year ?? parsed.year ?? new Date().getFullYear();
   const age = Math.max(0, new Date().getFullYear() - year);
@@ -112,7 +112,7 @@ export function buildDemoReport(listing: Listing, parsed: ParsedListing): Analys
       fairMinUsd: price - discount * 2,
       fairMaxUsd: price - Math.round(discount / 2 / 100) * 100,
       suggestedOfferUsd: price - discount * 2,
-      headline: `Демо: ціна умовно завищена на ~$${discount.toLocaleString('uk-UA')} — справжню оцінку дасть AI.`,
+      headline: 'Демо: це не оцінка ринку, а умовні −6% від ціни оголошення. Справжню оцінку дасть AI.',
       arguments: [
         'Демо-аргумент: витрати на діагностику й обслуговування після покупки знижують вартість.',
         'Демо-аргумент: без перевірки по VIN ризик прихованих ДТП закладається в ціну.',

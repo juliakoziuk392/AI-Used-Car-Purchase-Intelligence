@@ -1,6 +1,6 @@
 import type { ParsedListing } from '@carintel/shared';
 
-const USER_AGENT =
+export const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 /** Зберігаємо всі фото оголошення (на auto.ria їх буває до ~60). Скільки з них іде в LLM — вирішує аналітик. */
 const MAX_PHOTOS = 80;

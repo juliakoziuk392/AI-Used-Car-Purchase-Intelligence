@@ -1,5 +1,5 @@
 import { ANALYSIS_STEP_KEYS, ANALYSIS_STEPS, type AnalysisDto, type CarZone } from '@carintel/shared';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { paintFromColorName } from '../components/car3d/paint';
@@ -43,6 +43,12 @@ export function AnalysisPage() {
   const subtitle = listing.data ? vehicleSubtitle(listing.data) : '';
   const paint = paintFromColorName(listing.data?.rawData?.specs?.['Колір']);
 
+  // 3D саме цього авто; поки її немає — його реальне фото (найкращий ракурс за AI, інакше обкладинка).
+  const model3d = data.result?.model3d;
+  const modelUrl = model3d?.status === 'ready' ? `/api/analyses/${data.id}/model.glb?v=${data.updatedAt}` : undefined;
+  const photos = listing.data?.rawData?.photos ?? [];
+  const photo = (report?.heroPhoto ? photos[report.heroPhoto - 1] : undefined) ?? listing.data?.rawData?.cover ?? photos[0];
+
   return (
     <div className="flex flex-col gap-6">
       <Link to={`/listings/${data.listingId}`} className="text-sm text-mist transition-colors hover:text-ice">
@@ -64,6 +70,9 @@ export function AnalysisPage() {
               </span>
             )
           }
+          modelUrl={modelUrl}
+          photo={photo ?? undefined}
+          notice={report && model3d?.status === 'failed' ? <Model3dNotice analysisId={data.id} error={model3d.error} /> : null}
           paint={paint}
           findings={report ? sortFindings(report.findings) : []}
           selectedZone={selectedZone}
@@ -77,13 +86,39 @@ export function AnalysisPage() {
               report={report}
               selectedZone={selectedZone}
               setSelectedZone={setSelectedZone}
-              photos={listing.data?.rawData?.photos ?? []}
+              photos={photos}
             />
           </div>
         ) : (
           <AnalysisSteps analysis={data} />
         )}
       </div>
+    </div>
+  );
+}
+
+/** 3D не згенерувалась (напр. скінчилась квота GPU) — пояснюємо й даємо спробувати ще раз. */
+function Model3dNotice({ analysisId, error }: { analysisId: string; error?: string }) {
+  const queryClient = useQueryClient();
+  const regenerate = useMutation({
+    mutationFn: () => api.regenerateModel(analysisId),
+    onSuccess: (analysis) => queryClient.setQueryData(['analyses', analysisId], analysis),
+  });
+  const message = regenerate.error?.message ?? error;
+
+  return (
+    <div className="glass flex max-w-xl flex-col items-center gap-2 px-5 py-3 text-center sm:flex-row sm:text-left">
+      <p className="text-sm text-mist">
+        <span className="font-medium text-ice">3D цього авто не згенеровано.</span> {message}
+      </p>
+      <button
+        type="button"
+        disabled={regenerate.isPending}
+        onClick={() => regenerate.mutate()}
+        className="shrink-0 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm font-medium text-ice transition-colors hover:bg-white/20 disabled:opacity-60"
+      >
+        {regenerate.isPending ? 'Генеруємо… (1–3 хв)' : 'Згенерувати 3D'}
+      </button>
     </div>
   );
 }

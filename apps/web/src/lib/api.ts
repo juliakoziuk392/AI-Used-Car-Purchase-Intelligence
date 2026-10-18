@@ -59,6 +59,7 @@ export const api = {
   startAnalysis: (listingId: string) =>
     request<AnalysisDto>(`/listings/${listingId}/analyses`, { method: 'POST' }),
   getAnalysis: (id: string) => request<AnalysisDto>(`/analyses/${id}`),
+  regenerateModel: (id: string) => request<AnalysisDto>(`/analyses/${id}/model3d`, { method: 'POST' }),
 };
 
 /**

@@ -13,8 +13,10 @@ const usd = (value: number) => `$${value.toLocaleString('uk-UA')}`;
 export function PriceVerdict({ price }: { price: PriceAssessment }) {
   const verdict = VERDICT[price.verdict];
   const market = useCountUp(price.marketPriceUsd, 1600, 300);
-  const diff = price.listedPriceUsd - price.marketPriceUsd;
-  const diffPercent = Math.round((Math.abs(diff) / price.marketPriceUsd) * 100);
+  const listed = price.listedPriceUsd;
+  const diff = listed === null ? 0 : listed - price.marketPriceUsd;
+  const diffPercent = Math.round((Math.abs(diff) / Math.max(1, price.marketPriceUsd)) * 100);
+  const comparables = price.comparables ?? [];
 
   return (
     <section className="glass animate-fade-up overflow-hidden" style={{ animationDelay: '150ms' }}>
@@ -28,18 +30,22 @@ export function PriceVerdict({ price }: { price: PriceAssessment }) {
         </div>
 
         <div className="flex items-stretch gap-3">
-          <PriceTile label="Просять" value={usd(price.listedPriceUsd)} muted />
-          <div className="flex flex-col items-center justify-center px-1 text-center">
-            <span className="text-2xl text-mist">→</span>
-            {diff !== 0 && (
-              <span className="mt-1 whitespace-nowrap text-xs font-semibold" style={{ color: verdict.color }}>
-                {diff > 0 ? '+' : '−'}
-                {usd(Math.abs(diff))}
-                <br />
-                {diffPercent}%
-              </span>
-            )}
-          </div>
+          {listed !== null && (
+            <>
+              <PriceTile label="Просять" value={usd(listed)} muted />
+              <div className="flex flex-col items-center justify-center px-1 text-center">
+                <span className="text-2xl text-mist">→</span>
+                {diff !== 0 && (
+                  <span className="mt-1 whitespace-nowrap text-xs font-semibold" style={{ color: verdict.color }}>
+                    {diff > 0 ? '+' : '−'}
+                    {usd(Math.abs(diff))}
+                    <br />
+                    {diffPercent}%
+                  </span>
+                )}
+              </div>
+            </>
+          )}
           <PriceTile label="Реальна ціна" value={usd(market)} accent={verdict.color} />
         </div>
       </div>
@@ -62,9 +68,31 @@ export function PriceVerdict({ price }: { price: PriceAssessment }) {
               </li>
             ))}
           </ul>
+          {comparables.length > 0 && (
+            <div className="mt-5">
+              <p className="eyebrow">Схожі авто на ринку</p>
+              <ul className="mt-2 grid gap-2 md:grid-cols-2">
+                {comparables.map((item) => (
+                  <li key={item.url}>
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-3 rounded-xl border border-white/10 px-3 py-2 text-sm transition-colors hover:bg-white/5"
+                    >
+                      <span className="truncate text-ice/90">{item.title}</span>
+                      <span className="shrink-0 font-semibold tabular-nums">{usd(item.priceUsd)}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className="mt-4 text-xs text-mist">
-            Оцінка AI на основі знань про ринок України, а не живих оголошень. Діапазон ринку: {usd(price.fairMinUsd)}–
-            {usd(price.fairMaxUsd)}.
+            {comparables.length > 0
+              ? `Оцінка AI за ${comparables.length} схожими оголошеннями з поправками на стан і знахідки.`
+              : 'Оцінка AI на основі знань про ринок України — схожих оголошень не знайдено.'}{' '}
+            Діапазон ринку: {usd(price.fairMinUsd)}–{usd(price.fairMaxUsd)}.
           </p>
         </div>
       )}

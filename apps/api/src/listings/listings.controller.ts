@@ -1,21 +1,5 @@
-import {
-  createListingSchema,
-  updateListingSchema,
-  type CreateListingInput,
-  type UpdateListingInput,
-} from '@carintel/shared';
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { createListingSchema, type CreateListingInput } from '@carintel/shared';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard, type JwtPayload } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -42,15 +26,6 @@ export class ListingsController {
     @Body(new ZodValidationPipe(createListingSchema)) body: CreateListingInput,
   ) {
     return this.listings.create(user.sub, body);
-  }
-
-  @Patch(':id')
-  update(
-    @CurrentUser() user: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(updateListingSchema)) body: UpdateListingInput,
-  ) {
-    return this.listings.update(user.sub, id, body);
   }
 
   @Delete(':id')

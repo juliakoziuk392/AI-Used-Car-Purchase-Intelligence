@@ -3,6 +3,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { tokenStorage } from '../../lib/api';
 
 export const MODEL_URL = '/models/car-concept.glb';
 /** Довжина авто на сцені в метрах сцени. */
@@ -25,11 +26,31 @@ const ZONE_NODES: Record<CarZone, { node: string; anchor: 'center' | 'top' | 'bo
   documents: { node: 'License Plate', anchor: 'center' },
 };
 
+/**
+ * Модель з фото (TRELLIS) — суцільна сітка без іменованих деталей. Зони ставимо за габаритами:
+ * частки ширини (x, бік камери), висоти (y) і довжини (z: 1 — перед, TRELLIS дивиться в +Z, як і шоурум).
+ */
+const ZONE_FRACTIONS: Record<CarZone, [number, number, number]> = {
+  front: [0.5, 0.45, 1],
+  engine: [0.5, 0.72, 0.82],
+  electrics: [0.5, 0.78, 0.62],
+  interior: [0.5, 0.9, 0.45],
+  body: [1, 0.5, 0.5],
+  rear: [0.5, 0.6, 0],
+  front_wheel: [1, 0.2, 0.8],
+  rear_wheel: [1, 0.2, 0.2],
+  transmission: [0.5, 0.1, 0.62],
+  underbody: [0.5, 0.05, 0.38],
+  documents: [0.5, 0.3, 0],
+};
+
 const WHEELS = ['WheelFrontL', 'WheelFrontR', 'WheelRearL', 'WheelRearR'];
 
 export type ZoneAnchors = Partial<Record<CarZone, THREE.Vector3>>;
 
 interface CarModelProps {
+  /** GLB саме цього авто (з фото оголошення); без нього — стандартна модель. */
+  url?: string;
   carRef?: RefObject<THREE.Group | null>;
   paint: string;
   highlightZone: CarZone | null;
@@ -39,8 +60,20 @@ interface CarModelProps {
   children?: ReactNode;
 }
 
-export function CarModel({ carRef, paint, highlightZone, highlightColor, onAnchors, children }: CarModelProps) {
-  const { scene } = useLoader(GLTFLoader, MODEL_URL);
+export function CarModel({
+  url = MODEL_URL,
+  carRef,
+  paint,
+  highlightZone,
+  highlightColor,
+  onAnchors,
+  children,
+}: CarModelProps) {
+  // Згенеровані моделі віддає API за JWT.
+  const { scene } = useLoader(GLTFLoader, url, (loader) => {
+    const token = tokenStorage.get();
+    if (token) loader.setRequestHeader({ Authorization: `Bearer ${token}` });
+  });
   const ownRef = useRef<THREE.Group>(null);
   const group = carRef ?? ownRef;
   const driveStart = useRef<number | null>(null);
@@ -80,9 +113,15 @@ export function CarModel({ carRef, paint, highlightZone, highlightColor, onAncho
   useEffect(() => {
     model.updateMatrixWorld(true);
     const anchors: ZoneAnchors = {};
+    const whole = new THREE.Box3().setFromObject(model);
+    const size = whole.getSize(new THREE.Vector3());
     for (const [zone, { node, anchor }] of Object.entries(ZONE_NODES) as [CarZone, (typeof ZONE_NODES)[CarZone]][]) {
       const object = model.getObjectByName(node);
-      if (!object) continue;
+      if (!object) {
+        const [x, y, z] = ZONE_FRACTIONS[zone];
+        anchors[zone] = whole.min.clone().add(new THREE.Vector3(x, y, z).multiply(size));
+        continue;
+      }
       const box = new THREE.Box3().setFromObject(object);
       const point = box.getCenter(new THREE.Vector3());
       if (anchor === 'top') point.y = box.max.y + 0.05;

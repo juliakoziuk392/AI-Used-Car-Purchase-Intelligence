@@ -140,8 +140,9 @@ function RiskCard({ report }: { report: AnalysisReport }) {
 function PriceCard({ report }: { report: AnalysisReport }) {
   const { price } = report;
   const offer = useCountUp(price.suggestedOfferUsd, 1400, 500);
-  const min = Math.min(price.fairMinUsd, price.suggestedOfferUsd, price.listedPriceUsd);
-  const max = Math.max(price.fairMaxUsd, price.listedPriceUsd);
+  const listed = price.listedPriceUsd;
+  const min = Math.min(price.fairMinUsd, price.suggestedOfferUsd, listed ?? Infinity);
+  const max = Math.max(price.fairMaxUsd, listed ?? -Infinity);
   const pos = (value: number) => `${((value - min) / Math.max(1, max - min)) * 100}%`;
   return (
     <div className="glass animate-fade-up p-5" style={{ animationDelay: '200ms' }}>
@@ -152,12 +153,12 @@ function PriceCard({ report }: { report: AnalysisReport }) {
           className="absolute h-full rounded-full bg-sev-low/50"
           style={{ left: pos(price.fairMinUsd), width: `calc(${pos(price.fairMaxUsd)} - ${pos(price.fairMinUsd)})` }}
         />
-        <Marker left={pos(price.listedPriceUsd)} color="var(--color-sev-high)" />
+        {listed !== null && <Marker left={pos(listed)} color="var(--color-sev-high)" />}
         <Marker left={pos(price.suggestedOfferUsd)} color="var(--color-ice)" />
       </div>
       <div className="mt-2 flex justify-between text-xs text-mist">
         <span>Ринок {usd(price.fairMinUsd)}–{usd(price.fairMaxUsd)}</span>
-        <span>В оголошенні {usd(price.listedPriceUsd)}</span>
+        <span>{listed !== null ? `В оголошенні ${usd(listed)}` : 'Ціна не вказана'}</span>
       </div>
     </div>
   );
@@ -173,7 +174,8 @@ function Marker({ left, color }: { left: string; color: string }) {
 }
 
 function SavingsCard({ report }: { report: AnalysisReport }) {
-  const discount = Math.max(0, report.price.listedPriceUsd - report.price.suggestedOfferUsd);
+  const { listedPriceUsd, suggestedOfferUsd } = report.price;
+  const discount = listedPriceUsd === null ? 0 : Math.max(0, listedPriceUsd - suggestedOfferUsd);
   const repairs = report.findings.reduce((sum, f) => sum + (f.repairCostMaxUsd ?? 0), 0);
   const animatedDiscount = useCountUp(discount, 1400, 600);
   return (

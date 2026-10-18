@@ -28,6 +28,8 @@ export interface SceneCommands {
 }
 
 export interface CarSceneProps {
+  /** GLB цього авто з фото оголошення; без нього — стандартна модель у кольорі авто. */
+  modelUrl?: string;
   paint: string;
   findings: ReportFinding[];
   selectedZone: CarZone | null;
@@ -108,6 +110,7 @@ export default function CarScene(props: CarSceneProps) {
 }
 
 function SceneContent({
+  modelUrl,
   paint,
   zones,
   selectedZone,
@@ -217,6 +220,7 @@ function SceneContent({
       <directionalLight position={[-6, 3, -4]} intensity={0.6} color="#bfe3ff" />
 
       <CarModel
+        url={modelUrl}
         carRef={car}
         paint={paint}
         highlightZone={selectedZone}

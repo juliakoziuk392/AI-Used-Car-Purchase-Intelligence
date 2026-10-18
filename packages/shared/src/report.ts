@@ -54,8 +54,8 @@ export const PRICE_VERDICTS = ['fair', 'overpriced', 'underpriced'] as const;
 export type PriceVerdict = (typeof PRICE_VERDICTS)[number];
 
 export interface PriceAssessment {
-  /** Ціна, яку ввів користувач. */
-  listedPriceUsd: number;
+  /** Ціна з оголошення в USD; null — якщо продавець її не вказав. */
+  listedPriceUsd: number | null;
   verdict: PriceVerdict;
   /** Реальна ринкова ціна цього авто з урахуванням знахідок. */
   marketPriceUsd: number;
@@ -66,6 +66,14 @@ export interface PriceAssessment {
   headline: string;
   /** Аргументи «чому так»: що підвищує й що знижує ціну. */
   arguments: string[];
+  /** Схожі оголошення, які AI знайшов у мережі й на які спирав ринкову ціну. */
+  comparables?: MarketComparable[];
+}
+
+export interface MarketComparable {
+  title: string;
+  priceUsd: number;
+  url: string;
 }
 
 export const BODY_TYPES = [

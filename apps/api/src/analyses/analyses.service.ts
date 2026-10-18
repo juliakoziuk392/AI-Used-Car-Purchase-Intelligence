@@ -1,13 +1,15 @@
-import { TERMINAL_ANALYSIS_STATUSES } from '@carintel/shared';
+import { TERMINAL_ANALYSIS_STATUSES, type AnalysisResult, type ParsedListing } from '@carintel/shared';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type { Queue } from 'bullmq';
 import { concatMap, filter, map, Observable, startWith, takeWhile } from 'rxjs';
 import { Analysis, Listing, RiskFlag } from '../database/models';
+import { EMPTY_PARSED_LISTING } from '../listings/listing-parser';
 import { ListingsService } from '../listings/listings.service';
 import { AnalysisEventsListener } from './analysis-events.listener';
 import { ANALYSIS_QUEUE, type AnalysisJobData } from './analysis.queue';
+import { Model3dService } from './model3d.service';
 
 @Injectable()
 export class AnalysesService implements OnApplicationBootstrap {
@@ -18,6 +20,7 @@ export class AnalysesService implements OnApplicationBootstrap {
     @InjectQueue(ANALYSIS_QUEUE) private readonly queue: Queue<AnalysisJobData>,
     private readonly listings: ListingsService,
     private readonly events: AnalysisEventsListener,
+    private readonly model3d: Model3dService,
   ) {}
 
   /** Аналізи, створені до появи черги або втрачені при падінні, ставимо в чергу повторно. */
@@ -40,6 +43,17 @@ export class AnalysesService implements OnApplicationBootstrap {
       include: [{ model: Listing, where: { userId }, attributes: [] }, RiskFlag],
     });
     if (!analysis) throw new NotFoundException('Analysis not found');
+    return analysis;
+  }
+
+  /** Повторна генерація 3D без повторного AI-аналізу — напр. коли під час аналізу скінчилась квота GPU. */
+  async regenerateModel(userId: string, id: string) {
+    const analysis = await this.findOne(userId, id);
+    const listing = await Listing.findByPk(analysis.listingId);
+    const result = (analysis.result ?? {}) as AnalysisResult;
+    const parsed = { ...EMPTY_PARSED_LISTING, ...(listing?.rawData as Partial<ParsedListing>) };
+    const model3d = await this.model3d.generate(id, parsed, result.report);
+    await analysis.update({ result: { ...result, model3d } });
     return analysis;
   }
 
