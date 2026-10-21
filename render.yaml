@@ -9,6 +9,8 @@ services:
     region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
+    # Деплоїмо main лише після зелених перевірок GitHub Actions (.github/workflows/ci.yml).
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production

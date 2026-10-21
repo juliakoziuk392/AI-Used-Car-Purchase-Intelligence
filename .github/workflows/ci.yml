@@ -1,0 +1,42 @@
+# Перевірка кожного пушу й PR: типи, збірка всіх пакетів і Docker-образ, з якого деплоїть Render.
+# Render (autoDeployTrigger: checksPass у render.yaml) деплоїть main лише після зелених перевірок,
+# тож без фільтрів за шляхами: коміт без жодної перевірки Render теж не задеплоїть.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Версію pnpm бере з packageManager у package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
