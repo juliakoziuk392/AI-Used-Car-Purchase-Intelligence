@@ -19,9 +19,10 @@ RUN pnpm --filter @carintel/shared build \
   && pnpm --filter @carintel/api build
 
 FROM base AS runtime
-ENV NODE_ENV=production
 # Лише залежності API (з dev — заради sequelize-cli для міграцій); vite, three тощо в образ не потрапляють.
+# NODE_ENV задаємо після install: з NODE_ENV=production pnpm пропускає devDependencies.
 RUN pnpm install --frozen-lockfile --filter @carintel/api...
+ENV NODE_ENV=production
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
