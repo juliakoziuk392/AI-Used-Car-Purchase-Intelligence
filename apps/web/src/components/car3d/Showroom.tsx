@@ -1,9 +1,13 @@
 import { CAR_ZONE_LABELS, type CarZone, type ReportFinding } from '@carintel/shared';
-import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useRef, useState, type ReactNode } from 'react';
 import { SEVERITY_COLOR, worstSeverity } from '../car/zones';
 import { ErrorBoundary } from '../ErrorBoundary';
-import type { SceneCommands } from './CarScene';
+import type { CarPart } from './CarModel';
+import type { SceneCommands, SceneFeatures } from './CarScene';
 import { DEFAULT_PAINT } from './paint';
+
+const PART_LABELS: Record<CarPart, string> = { doors: 'Двері', hood: 'Капот', trunk: 'Багажник' };
+const NO_FEATURES: SceneFeatures = { parts: [], cabin: false };
 
 // Three.js важкий — вантажимо його лише на сторінках зі сценою.
 const CarScene = lazy(() => import('./CarScene'));
@@ -41,10 +45,33 @@ export function Showroom({
 }: ShowroomProps) {
   const commands = useRef<SceneCommands | null>(null);
   const zones = groupByZone(findings);
+  const [features, setFeatures] = useState<SceneFeatures>(NO_FEATURES);
+  const [openParts, setOpenParts] = useState<ReadonlySet<CarPart>>(new Set());
+  const [inCabin, setInCabin] = useState(false);
+  // Демо — стандартна модель, яка відчиняється; власне авто (з фото чи TRELLIS) — суцільне.
+  const [demo, setDemo] = useState(false);
+  const sceneModelUrl = demo ? undefined : modelUrl;
+  // Нова модель — нова сцена: відчинені деталі, салон і можливості попередньої на ній не діють.
+  const [openedFor, setOpenedFor] = useState(sceneModelUrl);
+  if (openedFor !== sceneModelUrl) {
+    setOpenedFor(sceneModelUrl);
+    setOpenParts(new Set());
+    setInCabin(false);
+    setFeatures(NO_FEATURES);
+  }
+  const handleFeatures = useCallback((next: SceneFeatures) => setFeatures(next), []);
+  const togglePart = (part: CarPart) =>
+    setOpenParts((current) => {
+      const next = new Set(current);
+      if (!next.delete(part)) next.add(part);
+      return next;
+    });
   // 3D цього авто не завантажилась (напр. сховище недоступне) — показуємо фото, а не «браузер не підтримує».
   const [failedModelUrl, setFailedModelUrl] = useState<string>();
   const modelFailed = Boolean(modelUrl) && failedModelUrl === modelUrl;
-  const showPhoto = (!modelUrl || modelFailed) && Boolean(photo);
+  const showPhoto = !demo && (!modelUrl || modelFailed) && Boolean(photo);
+  // Без моделі й фото власного авто на сцені й так стандартна модель — перемикач не потрібен.
+  const canSwitch = Boolean(modelUrl || photo);
 
   return (
     <section className="showroom relative h-[78vh] min-h-[560px] overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.8)]">
@@ -58,20 +85,23 @@ export function Showroom({
         // Без WebGL (вимкнене апаратне прискорення, збій драйвера) сцена падає — решта сторінки має жити.
         // key: нова модель (перегенерація) — нова сцена з заїздом авто.
         <ErrorBoundary
-          key={modelUrl}
+          key={sceneModelUrl}
           fallback={() => <SceneUnavailable />}
           onError={() => {
-            if (modelUrl) setFailedModelUrl(modelUrl);
+            if (sceneModelUrl) setFailedModelUrl(sceneModelUrl);
           }}
         >
           <Suspense fallback={<SceneLoader />}>
             <CarScene
-              modelUrl={modelUrl}
+              modelUrl={sceneModelUrl}
               paint={paint}
               findings={findings}
               selectedZone={selectedZone}
               onSelectZone={onSelectZone}
               scanning={scanning}
+              openParts={openParts}
+              onFeatures={handleFeatures}
+              onCabinChange={setInCabin}
               commands={commands}
             />
           </Suspense>
@@ -82,6 +112,20 @@ export function Showroom({
         <p className="eyebrow">{eyebrow}</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight drop-shadow md:text-5xl">{title}</h1>
         {subtitle && <div className="mt-2 text-mist">{subtitle}</div>}
+        {canSwitch && (
+          <div className="pointer-events-auto mt-4 inline-flex rounded-full border border-white/15 bg-night/50 p-1 backdrop-blur">
+            <SegmentButton active={!demo} onClick={() => setDemo(false)} hint="3D чи фото саме цього авто з оголошення">
+              Моє авто
+            </SegmentButton>
+            <SegmentButton
+              active={demo}
+              onClick={() => setDemo(true)}
+              hint="Стандартна модель: відчиняються двері, капот, багажник, видно салон"
+            >
+              Демо-модель
+            </SegmentButton>
+          </div>
+        )}
       </header>
 
       {zones.size > 0 && (
@@ -129,6 +173,24 @@ export function Showroom({
             </RoundButton>
           </div>
 
+          {(features.parts.length > 0 || features.cabin) && (
+            <div className="absolute inset-x-0 bottom-[calc(7%+3.25rem)] z-10 flex flex-wrap justify-center gap-2 px-4">
+              {features.parts.map((part) => (
+                <PillButton key={part} active={openParts.has(part)} onClick={() => togglePart(part)}>
+                  {PART_LABELS[part]}
+                </PillButton>
+              ))}
+              {features.cabin && (
+                <PillButton
+                  active={inCabin}
+                  onClick={() => (inCabin ? commands.current?.reset() : commands.current?.enterCabin())}
+                >
+                  {inCabin ? 'Вийти із салону' : 'Салон'}
+                </PillButton>
+              )}
+            </div>
+          )}
+
           <div className="absolute inset-x-0 bottom-[7%] z-10 flex items-center justify-center gap-4">
             <RoundButton label="Повернути вліво" onClick={() => commands.current?.rotateBy(-45)}>‹</RoundButton>
             <span className="select-none text-sm font-semibold tracking-[0.2em] text-ice/80">360°</span>
@@ -147,9 +209,13 @@ export function Showroom({
           ? modelFailed
             ? 'Фото з оголошення · 3D-модель не вдалося завантажити, спробуй оновити сторінку пізніше'
             : 'Фото з оголошення'
-          : modelUrl
-            ? 'Перетягни, щоб покрутити · 3D згенеровано з фото оголошення (TRELLIS)'
-            : 'Перетягни, щоб покрутити · 3D: «Car Concept» © Khronos Group, CC BY 4.0'}
+          : inCabin
+            ? 'Перетягни, щоб роззирнутися в салоні'
+            : sceneModelUrl
+              ? 'Перетягни — покрутити · права кнопка — зсунути · подвійний клік — наблизити · 3D з фото оголошення (TRELLIS) — суцільна оболонка, без салону й відчинених деталей'
+              : `Перетягни — покрутити · права кнопка — зсунути · подвійний клік — наблизити · ${
+                  demo ? 'демо-модель, не це авто · ' : ''
+                }3D: «Car Concept» © Khronos Group, CC BY 4.0`}
       </p>
     </section>
   );
@@ -163,6 +229,47 @@ function RoundButton({ label, onClick, children }: { label: string; onClick: () 
       title={label}
       onClick={onClick}
       className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-lg text-ice backdrop-blur transition-all hover:bg-white/15 active:scale-95"
+    >
+      {children}
+    </button>
+  );
+}
+
+function PillButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`rounded-full border px-4 py-1.5 text-sm font-medium backdrop-blur transition-all active:scale-95 ${
+        active ? 'border-white/40 bg-white/20 text-ice' : 'border-white/15 bg-night/40 text-ice/80 hover:bg-white/10 hover:text-ice'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SegmentButton({
+  active,
+  onClick,
+  hint,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={hint}
+      onClick={onClick}
+      className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
+        active ? 'bg-white/20 text-ice' : 'text-ice/70 hover:text-ice'
+      }`}
     >
       {children}
     </button>

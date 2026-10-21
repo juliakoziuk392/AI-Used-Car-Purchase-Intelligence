@@ -46,7 +46,32 @@ const ZONE_FRACTIONS: Record<CarZone, [number, number, number]> = {
 
 const WHEELS = ['WheelFrontL', 'WheelFrontR', 'WheelRearL', 'WheelRearR'];
 
+export type CarPart = 'doors' | 'hood' | 'trunk';
+
+/**
+ * Деталі стандартної моделі, що відчиняються. hinge — вісь петлі в частках габаритів самої деталі
+ * (x — ширина, y — довжина: 0 — передній край, z — висота; осі вузла, бо GLB зроблено в Z-up),
+ * axis і angle — поворот навколо петлі в осях батьківського вузла. Модель з фото — суцільна сітка, там цих вузлів нема.
+ */
+const OPENINGS: Record<CarPart, { node: string; hinge: [number, number, number]; axis: 'x' | 'z'; angle: number }[]> = {
+  doors: [
+    { node: 'BodyDoorLColor1', hinge: [0.5, 0, 0.5], axis: 'z', angle: -65 },
+    { node: 'BodyDoorRColor1', hinge: [0.5, 0, 0.5], axis: 'z', angle: 65 },
+  ],
+  // Капот-«раковина» разом із фарами: петля біля лобового скла, перед піднімається.
+  hood: [{ node: 'BodyHood', hinge: [0.5, 1, 1], axis: 'x', angle: -40 }],
+  // Задня кришка з вікном і ліхтарями: петля на краю даху.
+  trunk: [{ node: 'BodyRearPanelsColor1', hinge: [0.5, 0, 1], axis: 'x', angle: 55 }],
+};
+
 export type ZoneAnchors = Partial<Record<CarZone, THREE.Vector3>>;
+
+/** Що вміє модель: точки зон дефектів, деталі, які можна відчинити, і точка огляду салону. */
+export interface CarLayout {
+  anchors: ZoneAnchors;
+  parts: CarPart[];
+  cabin: THREE.Vector3 | null;
+}
 
 interface CarModelProps {
   /** GLB саме цього авто (з фото оголошення); без нього — стандартна модель. */
@@ -55,7 +80,8 @@ interface CarModelProps {
   paint: string;
   highlightZone: CarZone | null;
   highlightColor: string;
-  onAnchors: (anchors: ZoneAnchors) => void;
+  openParts: ReadonlySet<CarPart>;
+  onLayout: (layout: CarLayout) => void;
   /** Діти рендеряться всередині групи авто — їдуть разом з ним (точки дефектів). */
   children?: ReactNode;
 }
@@ -66,7 +92,8 @@ export function CarModel({
   paint,
   highlightZone,
   highlightColor,
-  onAnchors,
+  openParts,
+  onLayout,
   children,
 }: CarModelProps) {
   // Згенеровані моделі віддає API за JWT.
@@ -79,7 +106,7 @@ export function CarModel({
   const driveStart = useRef<number | null>(null);
 
   // Власна копія сцени й матеріалів: їх перефарбовуємо й підсвічуємо незалежно від кешу.
-  const { model, wheels } = useMemo(() => {
+  const { model, wheels, hinges } = useMemo(() => {
     const model = scene.clone(true);
     model.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -90,9 +117,10 @@ export function CarModel({
       // Логотип Khronos не входить у ліцензію моделі — ховаємо.
       if (object.name === 'InteriorSteeringEmblem') object.visible = false;
     });
+    const hinges = attachHinges(model);
     normalize(model);
     const wheels = WHEELS.map((name) => model.getObjectByName(name)).filter(Boolean) as THREE.Object3D[];
-    return { model, wheels };
+    return { model, wheels, hinges };
   }, [scene]);
 
   useLayoutEffect(() => {
@@ -128,8 +156,9 @@ export function CarModel({
       if (anchor === 'bottom') point.y = Math.max(0.15, box.min.y + 0.05);
       anchors[zone] = point;
     }
-    onAnchors(anchors);
-  }, [model, onAnchors]);
+    const parts = [...new Set(hinges.map((hinge) => hinge.part))];
+    onLayout({ anchors, parts, cabin: cabinPoint(model) });
+  }, [model, hinges, onLayout]);
 
   const highlighted = useMemo(() => {
     if (!highlightZone) return [];
@@ -151,9 +180,20 @@ export function CarModel({
     [highlighted],
   );
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const car = group.current;
     if (!car) return;
+
+    // Двері, капот і багажник плавно доходять до відчиненого чи зачиненого положення.
+    for (const { part, pivot, axis, angle } of hinges) {
+      const target = openParts.has(part) ? angle : 0;
+      const current = pivot.rotation[axis];
+      if (Math.abs(current - target) < 1e-4) {
+        pivot.rotation[axis] = target;
+      } else {
+        pivot.rotation[axis] = THREE.MathUtils.damp(current, target, 5, delta);
+      }
+    }
 
     // Заїзд на сцену: плавне гальмування, колеса крутяться відповідно до пройденої відстані.
     driveStart.current ??= clock.elapsedTime;
@@ -177,6 +217,61 @@ export function CarModel({
       {children}
     </group>
   );
+}
+
+interface Hinge {
+  part: CarPart;
+  pivot: THREE.Group;
+  axis: 'x' | 'z';
+  angle: number;
+}
+
+/** Підвішує кожну деталь з OPENINGS на групу-петлю: обертання групи відчиняє деталь навколо петлі. */
+function attachHinges(model: THREE.Object3D): Hinge[] {
+  const hinges: Hinge[] = [];
+  for (const [part, openings] of Object.entries(OPENINGS) as [CarPart, (typeof OPENINGS)[CarPart]][]) {
+    for (const { node, hinge, axis, angle } of openings) {
+      const object = model.getObjectByName(node);
+      if (!object?.parent) continue;
+      const box = localBox(object);
+      const point = box.min.clone().add(new THREE.Vector3(...hinge).multiply(box.getSize(new THREE.Vector3())));
+      object.updateMatrix();
+      point.applyMatrix4(object.matrix);
+
+      const pivot = new THREE.Group();
+      pivot.position.copy(point);
+      object.parent.add(pivot);
+      object.position.sub(point);
+      pivot.add(object);
+      hinges.push({ part, pivot, axis, angle: THREE.MathUtils.degToRad(angle) });
+    }
+  }
+  return hinges;
+}
+
+/**
+ * Габарити вузла в його власних осях. Деталь з кількома примітивами (капот з фарами, кришка з вікном)
+ * в glTF — Group, а не Mesh, тож у неї немає власної геометрії: беремо межі всіх вкладених сіток.
+ */
+function localBox(object: THREE.Object3D) {
+  if (object instanceof THREE.Mesh) {
+    object.geometry.computeBoundingBox();
+    return object.geometry.boundingBox!.clone();
+  }
+  object.updateWorldMatrix(true, true);
+  return new THREE.Box3().setFromObject(object).applyMatrix4(object.matrixWorld.clone().invert());
+}
+
+/** Точка між сидіннями на рівні очей водія — звідси оглядаємо салон. */
+function cabinPoint(model: THREE.Object3D) {
+  const floor = model.getObjectByName('InteriorFloor');
+  const roof = model.getObjectByName('BodyRoofPanel');
+  if (!floor || !roof) return null;
+  const floorBox = new THREE.Box3().setFromObject(floor);
+  const roofBox = new THREE.Box3().setFromObject(roof);
+  const point = floorBox.getCenter(new THREE.Vector3());
+  point.y = THREE.MathUtils.lerp(floorBox.max.y, roofBox.min.y, 0.55);
+  return point;
 }
 
 /** Ставить авто на підлогу (y = 0), центрує й масштабує до CAR_LENGTH. */

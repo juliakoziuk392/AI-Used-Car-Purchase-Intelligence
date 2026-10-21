@@ -1,5 +1,5 @@
 import { CAR_ZONE_LABELS, type CarZone, type ReportFinding } from '@carintel/shared';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import {
   Suspense,
@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { SEVERITY_COLOR, worstSeverity } from '../car/zones';
-import { CarModel, type ZoneAnchors } from './CarModel';
+import { CarModel, type CarLayout, type CarPart } from './CarModel';
 
 CameraControlsImpl.install({ THREE });
 
@@ -25,6 +25,14 @@ export interface SceneCommands {
   zoom: (step: number) => void;
   reset: () => void;
   focus: (zone: CarZone) => void;
+  /** Камера всередині салону: огляд навколо, як з місця водія. */
+  enterCabin: () => void;
+}
+
+/** Що можна робити з поточною моделлю: стандартна відчиняється, модель з фото — суцільна. */
+export interface SceneFeatures {
+  parts: CarPart[];
+  cabin: boolean;
 }
 
 export interface CarSceneProps {
@@ -35,6 +43,10 @@ export interface CarSceneProps {
   selectedZone: CarZone | null;
   onSelectZone: (zone: CarZone | null) => void;
   scanning: boolean;
+  openParts: ReadonlySet<CarPart>;
+  onFeatures: (features: SceneFeatures) => void;
+  /** true — камера в салоні, false — повернулась назовні (reset). */
+  onCabinChange: (inCabin: boolean) => void;
   commands: MutableRefObject<SceneCommands | null>;
 }
 
@@ -53,6 +65,10 @@ function homeLookAt(aspect: number) {
 const AUTO_ROTATE_SPEED = 0.12;
 const IDLE_BEFORE_AUTO_ROTATE_MS = 5000;
 const STAGE_RADIUS = 4.3;
+/** Наскільки близько камера підходить до деталі при подвійному кліку. */
+const FOCUS_DISTANCE = 3;
+/** Центр огляду не виходить за габарити авто — інакше зсувом можна «загубити» машину. */
+const PAN_BOUNDARY = new THREE.Box3(new THREE.Vector3(-1.6, 0, -2.8), new THREE.Vector3(1.6, 1.8, 2.8));
 
 export default function CarScene(props: CarSceneProps) {
   const [ready, setReady] = useState(false);
@@ -115,6 +131,9 @@ function SceneContent({
   zones,
   selectedZone,
   scanning,
+  openParts,
+  onFeatures,
+  onCabinChange,
   commands,
   hotspots,
   onReady,
@@ -125,7 +144,9 @@ function SceneContent({
 }) {
   const controls = useRef<CameraControlsImpl | null>(null);
   const car = useRef<THREE.Group>(null);
-  const [anchors, setAnchors] = useState<ZoneAnchors>({});
+  const [layout, setLayout] = useState<CarLayout>({ anchors: {}, parts: [], cabin: null });
+  const anchors = layout.anchors;
+  const inCabin = useRef(false);
   const lastInteraction = useRef(0);
   const size = useThree((state) => state.size);
   const aspect = useRef(size.width / size.height);
@@ -143,7 +164,26 @@ function SceneContent({
   }, [onReady]);
 
   useEffect(() => {
+    onFeatures({ parts: layout.parts, cabin: layout.cabin !== null });
+  }, [layout, onFeatures]);
+
+  // Сцена зникає (нова модель, збій 3D) — кнопки поза нею не мають лишитись із її станом.
+  useEffect(
+    () => () => {
+      onFeatures({ parts: [], cabin: false });
+      onCabinChange(false);
+    },
+    [onFeatures, onCabinChange],
+  );
+
+  useEffect(() => {
     const touch = () => (lastInteraction.current = performance.now());
+    const setCabin = (value: boolean) => {
+      if (!controls.current || inCabin.current === value) return;
+      inCabin.current = value;
+      configureView(controls.current, value ? 'cabin' : 'exterior');
+      onCabinChange(value);
+    };
     commands.current = {
       rotateBy: (degrees) => {
         touch();
@@ -153,11 +193,15 @@ function SceneContent({
         touch();
         void controls.current?.dolly(step, true);
       },
-      reset: () => void controls.current?.setLookAt(...homeLookAt(aspect.current), true),
+      reset: () => {
+        setCabin(false);
+        void controls.current?.setLookAt(...homeLookAt(aspect.current), true);
+      },
       focus: (zone) => {
         const point = anchors[zone];
         if (!point || !controls.current) return;
         touch();
+        setCabin(false);
         // Камера стає «зовні» від деталі — з того боку авто, де вона розташована.
         const outward = new THREE.Vector3(point.x, 0, point.z);
         if (outward.lengthSq() < 0.3) outward.set(1, 0, 0.6);
@@ -165,8 +209,17 @@ function SceneContent({
         const eye = point.clone().addScaledVector(outward, 4.2).setY(Math.max(1.4, point.y + 1.1));
         void controls.current.setLookAt(eye.x, eye.y, eye.z, point.x, point.y, point.z, true);
       },
+      enterCabin: () => {
+        const point = layout.cabin;
+        // Точка салону — у координатах авто: поки воно заїжджає на сцену, камера в неї не потрапить.
+        if (!point || !controls.current || Math.abs(car.current?.position.z ?? 0) > 0.01) return;
+        touch();
+        setCabin(true);
+        // Камера трохи позаду центру огляду й дивиться вперед, на панель приладів (перед авто — +Z).
+        void controls.current.setLookAt(point.x, point.y, point.z - 0.2, point.x, point.y, point.z, true);
+      },
     };
-  }, [anchors, commands]);
+  }, [anchors, layout.cabin, commands, onCabinChange]);
 
   useEffect(() => {
     if (selectedZone) commands.current?.focus(selectedZone);
@@ -176,7 +229,9 @@ function SceneContent({
   useFrame(({ camera, size }, delta) => {
     // Повільне обертання, поки користувач не чіпає авто.
     const idle = performance.now() - lastInteraction.current > IDLE_BEFORE_AUTO_ROTATE_MS;
-    if (controls.current && idle && !selectedZone) controls.current.rotate(delta * AUTO_ROTATE_SPEED, 0, false);
+    if (controls.current && idle && !selectedZone && !inCabin.current) {
+      controls.current.rotate(delta * AUTO_ROTATE_SPEED, 0, false);
+    }
 
     // Ставимо DOM-точки в екранні координати деталей; ховаємо ті, що на дальньому боці авто.
     const offset = car.current?.position ?? new THREE.Vector3();
@@ -188,7 +243,8 @@ function SceneContent({
       const y = ((1 - projected.y) / 2) * size.height;
       element.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
 
-      let visible = projected.z < 1;
+      // Із салону точки дефектів кузова проєктуються навмання — ховаємо їх.
+      let visible = projected.z < 1 && !inCabin.current;
       if (Math.hypot(anchor.x, anchor.z) > 0.9) {
         const toPoint = new THREE.Vector2(anchor.x, anchor.z).normalize();
         const toCamera = new THREE.Vector2(camera.position.x, camera.position.z).normalize();
@@ -200,7 +256,18 @@ function SceneContent({
     }
   });
 
-  const handleAnchors = useCallback((next: ZoneAnchors) => setAnchors(next), []);
+  const handleLayout = useCallback((next: CarLayout) => setLayout(next), []);
+
+  /** Подвійний клік по деталі: центр огляду переїжджає в цю точку, камера наближається. */
+  const focusPoint = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    if (!controls.current || inCabin.current) return;
+    lastInteraction.current = performance.now();
+    const { x, y, z } = event.point;
+    void controls.current.moveTo(x, y, z, true);
+    // Лише наближаємо: якщо камера вже ближче, не відсуваємо її.
+    if (controls.current.distance > FOCUS_DISTANCE) void controls.current.dollyTo(FOCUS_DISTANCE, true);
+  };
 
   return (
     <>
@@ -219,16 +286,19 @@ function SceneContent({
       />
       <directionalLight position={[-6, 3, -4]} intensity={0.6} color="#bfe3ff" />
 
-      <CarModel
-        url={modelUrl}
-        carRef={car}
-        paint={paint}
-        highlightZone={selectedZone}
-        highlightColor={highlightColor}
-        onAnchors={handleAnchors}
-      >
-        {scanning && <ScanBeam />}
-      </CarModel>
+      <group onDoubleClick={focusPoint}>
+        <CarModel
+          url={modelUrl}
+          carRef={car}
+          paint={paint}
+          highlightZone={selectedZone}
+          highlightColor={highlightColor}
+          openParts={openParts}
+          onLayout={handleLayout}
+        >
+          {scanning && <ScanBeam />}
+        </CarModel>
+      </group>
 
       <Stage />
     </>
@@ -247,15 +317,11 @@ function Controls({
   const controls = useMemo(() => new CameraControlsImpl(camera, domElement), [camera, domElement]);
 
   useEffect(() => {
-    controls.minDistance = 4;
-    controls.maxDistance = 22;
-    controls.minPolarAngle = Math.PI * 0.22;
-    controls.maxPolarAngle = Math.PI * 0.485;
-    controls.truckSpeed = 0;
     controls.smoothTime = 0.6;
-    // Колесо миші лишаємо для прокрутки сторінки; наближення — кнопками.
+    configureView(controls, 'exterior');
+    // Колесо миші лишаємо для прокрутки сторінки; наближення — кнопками й щипком на сенсорі.
     controls.mouseButtons.wheel = CameraControlsImpl.ACTION.NONE;
-    controls.mouseButtons.right = CameraControlsImpl.ACTION.NONE;
+    controls.setBoundary(PAN_BOUNDARY);
     controls.addEventListener('controlstart', onStart);
     controlsRef.current = controls;
     return () => {
@@ -266,6 +332,22 @@ function Controls({
 
   useFrame((_, delta) => controls.update(delta));
   return null;
+}
+
+/**
+ * Обмеження камери. Ззовні — будь-який кут від майже згори до рівня підлоги й близько до кузова;
+ * у салоні камера майже в центрі огляду, тож обертання — це погляд навколо, а зсув вимкнено.
+ * Права кнопка й два пальці зсувають центр огляду — щоб роздивитись бампер чи колесо зблизька.
+ */
+function configureView(controls: CameraControlsImpl, view: 'exterior' | 'cabin') {
+  const cabin = view === 'cabin';
+  controls.minDistance = cabin ? 0.05 : 2.8;
+  controls.maxDistance = cabin ? 0.6 : 22;
+  controls.minPolarAngle = cabin ? Math.PI * 0.2 : Math.PI * 0.04;
+  controls.maxPolarAngle = cabin ? Math.PI * 0.8 : Math.PI * 0.49;
+  controls.truckSpeed = cabin ? 0 : 1;
+  controls.mouseButtons.right = cabin ? CameraControlsImpl.ACTION.NONE : CameraControlsImpl.ACTION.TRUCK;
+  controls.touches.two = cabin ? CameraControlsImpl.ACTION.TOUCH_DOLLY : CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK;
 }
 
 /** Студійне оточення: дає довгі відблиски софтбоксів на лаку. */
@@ -348,7 +430,8 @@ function ScanBeam() {
     (beam.current.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.08 * Math.sin(clock.elapsedTime * 6);
   });
   return (
-    <mesh ref={beam} position={[0, 0.75, 0]}>
+    // Промінь прозорий для подвійного кліку: інакше він перехоплює клік замість авто.
+    <mesh ref={beam} position={[0, 0.75, 0]} raycast={() => null}>
       <boxGeometry args={[2.6, 1.6, 0.02]} />
       <meshBasicMaterial color="#9fd8ff" transparent opacity={0.2} blending={THREE.AdditiveBlending} depthWrite={false} />
     </mesh>
