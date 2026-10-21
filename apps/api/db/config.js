@@ -9,6 +9,10 @@ const base = {
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   migrationStorageTableName: 'sequelize_meta',
+  // Як і в API (DB_SSL у src/config/env.ts): керовані Postgres приймають лише TLS.
+  ...(process.env.DB_SSL === 'true' && {
+    dialectOptions: { ssl: { require: true, rejectUnauthorized: false } },
+  }),
 };
 
 module.exports = {

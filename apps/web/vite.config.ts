@@ -11,8 +11,12 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // API працює без префікса /api — клієнт ходить на /api, а проксі його відрізає (у проді так само робить nginx).
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': {
+        target: 'http://localhost:3000',
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
   },
 });

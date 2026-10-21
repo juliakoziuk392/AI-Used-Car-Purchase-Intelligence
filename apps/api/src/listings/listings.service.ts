@@ -1,8 +1,9 @@
 import { detectListingSource, type CreateListingInput } from '@carintel/shared';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type { Transaction } from 'sequelize';
 import { Analysis, Listing, Vehicle } from '../database/models';
+import { modelKey, StorageService } from '../storage/storage.service';
 import { EMPTY_PARSED_LISTING, parseListingPage } from './listing-parser';
 
 export interface VehicleFields {
@@ -17,9 +18,12 @@ export interface VehicleFields {
 
 @Injectable()
 export class ListingsService {
+  private readonly logger = new Logger(ListingsService.name);
+
   constructor(
     @InjectModel(Listing) private readonly listings: typeof Listing,
     @InjectModel(Vehicle) private readonly vehicles: typeof Vehicle,
+    private readonly storage: StorageService,
   ) {}
 
   findAll(userId: string) {
@@ -87,6 +91,11 @@ export class ListingsService {
 
   async remove(userId: string, id: string) {
     const listing = await this.findOne(userId, id);
+    const analysisIds = (listing.analyses ?? []).map((analysis) => analysis.id);
     await listing.destroy();
+    // Аналізи видаляє каскад у БД, а їхні 3D-моделі прибираємо зі сховища самі.
+    await this.storage
+      .delete(analysisIds.map(modelKey))
+      .catch((error: unknown) => this.logger.warn(`3D-моделі оголошення ${id} не видалено зі сховища: ${error}`));
   }
 }

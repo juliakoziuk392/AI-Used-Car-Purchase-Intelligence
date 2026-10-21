@@ -1,10 +1,11 @@
-import type { ParsedListing } from '@carintel/shared';
+import { isSupportedListingUrl, type ParsedListing } from '@carintel/shared';
 
 export const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 /** Зберігаємо всі фото оголошення (на auto.ria їх буває до ~60). Скільки з них іде в LLM — вирішує аналітик. */
 const MAX_PHOTOS = 80;
 const MAX_DESCRIPTION_CHARS = 8000;
+const MAX_REDIRECTS = 3;
 
 type Json = Record<string, unknown>;
 
@@ -15,12 +16,26 @@ type Json = Record<string, unknown>;
  * - og:title — ціна.
  */
 export async function parseListingPage(url: string): Promise<ParsedListing> {
-  const response = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'uk,ru;q=0.8,en;q=0.5' },
-    signal: AbortSignal.timeout(15_000),
-  });
+  const response = await fetchListingPage(url);
   if (!response.ok) throw new Error(`Сторінка оголошення недоступна (HTTP ${response.status})`);
   return parseListingHtml(await response.text());
+}
+
+/** Редиректи проходимо вручну: кожна адреса в ланцюжку теж має бути на auto.ria. */
+async function fetchListingPage(url: string): Promise<Response> {
+  let current = url;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    if (!isSupportedListingUrl(current)) throw new Error('Підтримуються лише оголошення з auto.ria.com');
+    const response = await fetch(current, {
+      headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'uk,ru;q=0.8,en;q=0.5' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+    });
+    const location = response.headers.get('location');
+    if (response.status < 300 || response.status >= 400 || !location) return response;
+    current = new URL(location, current).toString();
+  }
+  throw new Error('Забагато перенаправлень на сторінці оголошення');
 }
 
 export const EMPTY_PARSED_LISTING: ParsedListing = {

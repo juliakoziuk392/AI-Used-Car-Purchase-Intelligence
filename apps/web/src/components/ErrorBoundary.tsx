@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 interface ErrorBoundaryProps {
   /** Що показати замість дітей, якщо вони впали під час рендеру. */
   fallback: (error: Error, reset: () => void) => ReactNode;
+  onError?: (error: Error) => void;
   children: ReactNode;
 }
 
@@ -16,6 +17,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, { error: Error 
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Render failed', error, info.componentStack);
+    this.props.onError?.(error);
   }
 
   reset = () => this.setState({ error: null });

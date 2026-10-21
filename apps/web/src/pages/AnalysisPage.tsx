@@ -72,7 +72,13 @@ export function AnalysisPage() {
           }
           modelUrl={modelUrl}
           photo={photo ?? undefined}
-          notice={report && model3d?.status === 'failed' ? <Model3dNotice analysisId={data.id} error={model3d.error} /> : null}
+          notice={
+            report && model3d?.status === 'generating' ? (
+              <Model3dProgress progress={model3d.progress ?? 0} stage={model3d.stage} />
+            ) : report && model3d?.status === 'failed' ? (
+              <Model3dNotice analysisId={data.id} error={model3d.error} />
+            ) : null
+          }
           paint={paint}
           findings={report ? sortFindings(report.findings) : []}
           selectedZone={selectedZone}
@@ -97,11 +103,29 @@ export function AnalysisPage() {
   );
 }
 
+/** 3D генерується у фоні — етап і прогрес приходять через SSE. */
+function Model3dProgress({ progress, stage }: { progress: number; stage?: string }) {
+  return (
+    <div className="glass flex w-full max-w-sm flex-col gap-2 px-5 py-3">
+      <p className="text-sm text-mist">
+        <span className="font-medium text-ice">Генеруємо 3D цього авто…</span> {stage}
+      </p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-ice transition-[width] duration-700 ease-out"
+          style={{ width: `${Math.max(progress, 4)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** 3D не згенерувалась (напр. скінчилась квота GPU) — пояснюємо й даємо спробувати ще раз. */
 function Model3dNotice({ analysisId, error }: { analysisId: string; error?: string }) {
   const queryClient = useQueryClient();
   const regenerate = useMutation({
     mutationFn: () => api.regenerateModel(analysisId),
+    // Відповідь приходить одразу зі status 'generating' — useAnalysis відкриває SSE й показує прогрес.
     onSuccess: (analysis) => queryClient.setQueryData(['analyses', analysisId], analysis),
   });
   const message = regenerate.error?.message ?? error;
@@ -117,7 +141,7 @@ function Model3dNotice({ analysisId, error }: { analysisId: string; error?: stri
         onClick={() => regenerate.mutate()}
         className="shrink-0 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm font-medium text-ice transition-colors hover:bg-white/20 disabled:opacity-60"
       >
-        {regenerate.isPending ? 'Генеруємо… (1–3 хв)' : 'Згенерувати 3D'}
+        {regenerate.isPending ? 'Ставимо в чергу…' : 'Згенерувати 3D'}
       </button>
     </div>
   );

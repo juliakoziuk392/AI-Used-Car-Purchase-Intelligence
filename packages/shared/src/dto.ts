@@ -1,18 +1,25 @@
-import type {
-  AnalysisStatus,
-  AnalysisStepKey,
-  ListingSource,
-  RiskSeverity,
-  RiskSource,
+import {
+  TERMINAL_ANALYSIS_STATUSES,
+  type AnalysisStatus,
+  type AnalysisStepKey,
+  type ListingSource,
+  type RiskSeverity,
+  type RiskSource,
 } from './enums';
 import type { AnalysisReport, ParsedListing } from './report';
 
 /** 3D-модель саме цього авто, згенерована з фото оголошення. */
 export interface Model3dResult {
-  status: 'ready' | 'failed';
+  /** generating — повторна генерація йде у фоні (задача в черзі), прогрес приходить через SSE. */
+  status: 'generating' | 'ready' | 'failed';
   /** Номери фото оголошення, з яких будувалась модель. */
   photos: number[];
   error?: string;
+  /** Лише для generating: прогрес 0–100 і поточний етап. */
+  progress?: number;
+  stage?: string;
+  /** Лише для generating: коли поставили в чергу (ISO) — щоб розпізнати задачу, що зависла. */
+  startedAt?: string;
 }
 
 export interface AnalysisResult {
@@ -62,6 +69,16 @@ export interface AnalysisDto {
   riskFlags?: RiskFlagDto[];
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Чи більше не буде оновлень: аналіз завершився і 3D не генерується у фоні.
+ * Доки ні — SSE-стрім лишається відкритим.
+ */
+export function isAnalysisSettled(analysis: Pick<AnalysisDto, 'status' | 'result'>): boolean {
+  return (
+    TERMINAL_ANALYSIS_STATUSES.includes(analysis.status) && analysis.result?.model3d?.status !== 'generating'
+  );
 }
 
 export interface ListingDto {

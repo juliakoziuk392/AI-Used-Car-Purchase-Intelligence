@@ -21,8 +21,13 @@ services:
       - "6379:6379"
 
   minio:
-    image: minio/minio:latest
+    # Офіційний minio/minio більше не публікується на Docker Hub/quay.io — це збірка Chainguard
+    # того самого MinIO (entrypoint /usr/bin/minio), регулярно оновлюється.
+    image: cgr.dev/chainguard/minio:latest
     command: server /data --console-address ":9001"
+    # Образ за замовчуванням працює від uid 65532, а свіжий volume /data належить root.
+    # Лише для локальної розробки; у продакшені — керований S3 (див. README).
+    user: root
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}

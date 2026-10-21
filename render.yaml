@@ -1,0 +1,72 @@
+# Render Blueprint: один веб-сервіс (API + зібраний фронт) і Redis для черги BullMQ.
+# Postgres і файли 3D-моделей — у Supabase; покроково див. README → «Деплой на Render».
+# Значення з `sync: false` Render попросить ввести при першому створенні Blueprint.
+services:
+  - type: web
+    name: carintel
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_PORT
+        value: "10000"
+      - key: TRUST_PROXY
+        value: "true"
+      # Адреса сайту, напр. https://carintel.example.com
+      - key: WEB_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: carintel-redis
+          property: connectionString
+
+      # Supabase → Connect → Session pooler (прямий хост db.*.supabase.co лише IPv6, Render до нього не дістає).
+      - key: DB_HOST
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_EXTERNAL_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_SSL
+        value: "true"
+
+      # Supabase → Storage → S3 Connection.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: carintel-photos
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+
+  - type: keyvalue
+    name: carintel-redis
+    plan: free
+    region: frankfurt
+    # BullMQ вимагає noeviction: інакше Redis при нестачі пам'яті мовчки видаляє задачі.
+    maxmemoryPolicy: noeviction
+    # Лише внутрішня мережа Render — ззовні Redis недоступний.
+    ipAllowList: []

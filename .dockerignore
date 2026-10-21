@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.turbo
+.git
+.idea
+.vscode
+.claude
+.env
+*.log
+apps/api/storage

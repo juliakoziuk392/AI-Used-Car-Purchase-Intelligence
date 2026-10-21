@@ -23,6 +23,20 @@ export type RiskSeverity = (typeof RISK_SEVERITIES)[number];
 export const RISK_SOURCES = ['llm', 'vision', 'rag', 'market'] as const;
 export type RiskSource = (typeof RISK_SOURCES)[number];
 
+/**
+ * Чи можна серверу завантажувати цю сторінку. Дозволяємо лише auto.ria —
+ * інакше через поле URL можна змусити API ходити на внутрішні адреси (SSRF).
+ */
+export function isSupportedListingUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    const host = hostname.toLowerCase();
+    return (protocol === 'https:' || protocol === 'http:') && (host === 'auto.ria.com' || host.endsWith('.auto.ria.com'));
+  } catch {
+    return false;
+  }
+}
+
 export function detectListingSource(url: string): ListingSource {
   const host = new URL(url).hostname.replace(/^www\./, '');
   if (host === 'auto.ria.com' || host.endsWith('.auto.ria.com')) return 'autoria';

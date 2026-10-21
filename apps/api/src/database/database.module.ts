@@ -15,6 +15,8 @@ import { models } from './models';
         username: config.getOrThrow<string>('DB_USERNAME'),
         password: config.getOrThrow<string>('DB_PASSWORD'),
         database: config.getOrThrow<string>('DB_NAME'),
+        // Сертифікат Supabase підписаний її власним CA, не публічним — ланцюжок не перевіряємо.
+        dialectOptions: config.get<boolean>('DB_SSL') ? { ssl: { require: true, rejectUnauthorized: false } } : undefined,
         models,
         // Схемою керують міграції (apps/api/db/migrations), не sync().
         synchronize: false,

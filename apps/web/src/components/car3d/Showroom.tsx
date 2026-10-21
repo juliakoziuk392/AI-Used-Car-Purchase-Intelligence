@@ -1,5 +1,5 @@
 import { CAR_ZONE_LABELS, type CarZone, type ReportFinding } from '@carintel/shared';
-import { lazy, Suspense, useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
 import { SEVERITY_COLOR, worstSeverity } from '../car/zones';
 import { ErrorBoundary } from '../ErrorBoundary';
 import type { SceneCommands } from './CarScene';
@@ -41,7 +41,10 @@ export function Showroom({
 }: ShowroomProps) {
   const commands = useRef<SceneCommands | null>(null);
   const zones = groupByZone(findings);
-  const showPhoto = !modelUrl && Boolean(photo);
+  // 3D цього авто не завантажилась (напр. сховище недоступне) — показуємо фото, а не «браузер не підтримує».
+  const [failedModelUrl, setFailedModelUrl] = useState<string>();
+  const modelFailed = Boolean(modelUrl) && failedModelUrl === modelUrl;
+  const showPhoto = (!modelUrl || modelFailed) && Boolean(photo);
 
   return (
     <section className="showroom relative h-[78vh] min-h-[560px] overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.8)]">
@@ -54,7 +57,13 @@ export function Showroom({
       ) : (
         // Без WebGL (вимкнене апаратне прискорення, збій драйвера) сцена падає — решта сторінки має жити.
         // key: нова модель (перегенерація) — нова сцена з заїздом авто.
-        <ErrorBoundary key={modelUrl} fallback={() => <SceneUnavailable />}>
+        <ErrorBoundary
+          key={modelUrl}
+          fallback={() => <SceneUnavailable />}
+          onError={() => {
+            if (modelUrl) setFailedModelUrl(modelUrl);
+          }}
+        >
           <Suspense fallback={<SceneLoader />}>
             <CarScene
               modelUrl={modelUrl}
@@ -134,10 +143,12 @@ export function Showroom({
       )}
 
       <p className="pointer-events-none absolute bottom-3 right-5 z-10 text-[10px] text-ice/35">
-        {modelUrl
-          ? 'Перетягни, щоб покрутити · 3D згенеровано з фото оголошення (TRELLIS)'
-          : showPhoto
-            ? 'Фото з оголошення'
+        {showPhoto
+          ? modelFailed
+            ? 'Фото з оголошення · 3D-модель не вдалося завантажити, спробуй оновити сторінку пізніше'
+            : 'Фото з оголошення'
+          : modelUrl
+            ? 'Перетягни, щоб покрутити · 3D згенеровано з фото оголошення (TRELLIS)'
             : 'Перетягни, щоб покрутити · 3D: «Car Concept» © Khronos Group, CC BY 4.0'}
       </p>
     </section>

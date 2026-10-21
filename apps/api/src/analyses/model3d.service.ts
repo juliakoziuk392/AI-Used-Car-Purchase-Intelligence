@@ -1,13 +1,18 @@
 import type { AnalysisReport, Model3dResult, ParsedListing, PhotoView } from '@carintel/shared';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { modelKey, StorageService, type StoredObject } from '../storage/storage.service';
+
+/** Етап генерації для прогресу в UI: відсоток 0–100 і підпис. */
+export type Model3dProgress = (progress: number, stage: string) => Promise<void>;
 
 /** Ракурси, що найкраще доповнюють головне фото для реконструкції всього кузова. */
 const EXTRA_VIEWS: PhotoView[] = ['rear_left', 'rear_right', 'rear', 'left', 'right', 'front_left', 'front_right', 'front'];
 const MAX_VIEWS = 4;
+export const GLB_CONTENT_TYPE = 'model/gltf-binary';
 
 interface FileData {
   url?: string;
@@ -24,36 +29,64 @@ export class Model3dService {
   private readonly logger = new Logger(Model3dService.name);
   private readonly space: string;
   private readonly hfToken: `hf_${string}` | undefined;
-  private readonly directory: string;
+  /** Раніше моделі лежали на диску — звідти їх переносимо в S3 при першому запиті. */
+  private readonly legacyDirectory: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly storage: StorageService,
+  ) {
     this.space = config.get<string>('TRELLIS_SPACE', 'trellis-community/TRELLIS');
     this.hfToken = (config.get<string>('HF_TOKEN') || undefined) as `hf_${string}` | undefined;
-    this.directory = path.resolve(config.get<string>('STORAGE_DIR', 'storage'), 'models');
+    this.legacyDirectory = path.resolve(config.get<string>('STORAGE_DIR', 'storage'), 'models');
   }
 
-  filePath(analysisId: string) {
-    const file = path.join(this.directory, `${analysisId}.glb`);
-    if (!existsSync(file)) throw new NotFoundException('3D-модель ще не згенерована');
-    return file;
+  /**
+   * GLB-модель аналізу зі сховища. Старі моделі з диска віддаємо навіть тоді, коли S3 недоступне
+   * (напр. MinIO не запущено), — переносимо їх у S3, щойно воно запрацює.
+   */
+  async open(analysisId: string): Promise<StoredObject> {
+    let storageError: unknown;
+    const stored = await this.storage.get(modelKey(analysisId)).catch((error: unknown) => {
+      storageError = error;
+      return null;
+    });
+    if (stored) return stored;
+
+    const legacy = await this.openLegacy(analysisId, { migrate: !storageError });
+    if (legacy) return legacy;
+    if (storageError) {
+      this.logger.warn(`3D для ${analysisId} не прочитано з S3: ${errorMessage(storageError)}`);
+      throw new ServiceUnavailableException('Сховище 3D-моделей недоступне — перевір, що MinIO/S3 запущено');
+    }
+    throw new NotFoundException('3D-модель ще не згенерована');
   }
 
-  async generate(analysisId: string, parsed: ParsedListing, report: AnalysisReport | undefined): Promise<Model3dResult> {
+  async generate(
+    analysisId: string,
+    parsed: ParsedListing,
+    report: AnalysisReport | undefined,
+    onProgress: Model3dProgress = async () => {},
+  ): Promise<Model3dResult> {
     const photos = pickPhotos(parsed, report);
     if (!photos.length) return { status: 'failed', photos: [], error: 'В оголошенні немає фото кузова' };
 
     try {
+      await onProgress(5, 'Підключаємось до GPU');
       // Пакет ESM-only — підвантажуємо динамічно з CommonJS-збірки Nest.
       const { Client, handle_file } = await import('@gradio/client');
       const client = await Client.connect(this.space, { hf_token: this.hfToken });
       await client.predict('/start_session', {});
 
       const prepared: FileData[] = [];
-      for (const { url } of photos) {
+      for (const [index, { url }] of photos.entries()) {
+        await onProgress(10 + Math.round((index / photos.length) * 30), `Готуємо фото ${index + 1} з ${photos.length}`);
         const result = await client.predict('/preprocess_image', { image: handle_file(url) });
         prepared.push((result.data as FileData[])[0]);
       }
 
+      // Найдовший етап (1–3 хв) — проміжного прогресу TRELLIS не віддає.
+      await onProgress(45, 'Будуємо 3D-модель');
       const result = await client.predict('/generate_and_extract_glb', {
         image: prepared[0],
         // Кілька ракурсів того самого авто — TRELLIS відновлює кузов з усіх боків точніше.
@@ -72,13 +105,13 @@ export class Model3dService {
       const url = glb?.url ?? download?.url;
       if (!url) throw new Error('TRELLIS не повернув GLB');
 
+      await onProgress(90, 'Зберігаємо модель');
       const response = await fetch(url, {
         headers: this.hfToken ? { Authorization: `Bearer ${this.hfToken}` } : {},
       });
       if (!response.ok) throw new Error(`Не вдалося завантажити GLB (HTTP ${response.status})`);
 
-      await mkdir(this.directory, { recursive: true });
-      await writeFile(path.join(this.directory, `${analysisId}.glb`), Buffer.from(await response.arrayBuffer()));
+      await this.storage.put(modelKey(analysisId), Buffer.from(await response.arrayBuffer()), GLB_CONTENT_TYPE);
       return { status: 'ready', photos: photos.map((photo) => photo.number) };
     } catch (error) {
       const message = gradioErrorMessage(error);
@@ -86,6 +119,23 @@ export class Model3dService {
       return { status: 'failed', photos: photos.map((photo) => photo.number), error: message };
     }
   }
+
+  /** Модель зі старого сховища на диску; з migrate — заодно копіюємо її в S3. */
+  private async openLegacy(analysisId: string, { migrate }: { migrate: boolean }): Promise<StoredObject | null> {
+    const file = await readFile(path.join(this.legacyDirectory, `${analysisId}.glb`)).catch(() => null);
+    if (!file) return null;
+    if (migrate) {
+      await this.storage
+        .put(modelKey(analysisId), file, GLB_CONTENT_TYPE)
+        .then(() => this.logger.log(`3D для ${analysisId} перенесено з диска в S3`))
+        .catch((error: unknown) => this.logger.warn(`3D для ${analysisId} не перенесено в S3: ${errorMessage(error)}`));
+    }
+    return { body: Readable.from(file), length: file.length };
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
